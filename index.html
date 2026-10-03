@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Focus Timer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600&display=swap">
+<style>
+/* Layout: full-screen jar. Timer centered on top; finished sessions fall as cookie friends and pile up from the bottom. */
+:root {
+  --bg: #f6f2ec; --fg: #2a211b; --muted: #8a7b6e; --line: #e3d9cc; --pill: rgba(246,242,236,.82);
+  --sans: "Manrope", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #171310; --fg: #f1e8dc; --muted: #9d8f80; --line: #342b24; --pill: rgba(23,19,16,.78); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #171310; --fg: #f1e8dc; --muted: #9d8f80; --line: #342b24; --pill: rgba(23,19,16,.78); color-scheme: dark }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); overflow: hidden; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.ui { position: relative; z-index: 1; height: 100%; display: grid; place-items: center; padding-inline: 16px; box-sizing: border-box; pointer-events: none; }
+.center { display: grid; justify-items: center; gap: 18px; padding: 18px 28px 22px; border-radius: 28px; background: var(--pill); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); pointer-events: auto; }
+.mode { font-size: 12px; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); font-weight: 500; height: 14px; }
+.time { font-size: clamp(72px, 14vw, 120px); font-weight: 300; line-height: .9; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.ctrls { display: flex; align-items: center; gap: 20px; }
+.go { font: inherit; font-size: 15px; font-weight: 600; color: var(--bg); background: var(--fg); border: 0; border-radius: 999px; padding: 12px 30px; cursor: pointer; min-width: 120px; }
+.quiet { font: inherit; font-size: 14px; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 6px 2px; }
+.quiet:hover { color: var(--fg); }
+.lengths { font-size: 14px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.lengths button { font: inherit; color: var(--fg); background: none; border: 0; border-bottom: 1px dashed var(--muted); padding: 2px 1px; cursor: pointer; font-weight: 500; }
+.tally { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 18px; z-index: 2; font-size: 12px; color: var(--muted); display: flex; gap: 10px; align-items: center; background: var(--pill); padding: 6px 12px; border-radius: 999px; }
+.tally button { font: inherit; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+.tally:empty { display: none; }
+button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+</style>
+
+<canvas id="jar" aria-hidden="true"></canvas>
+<div class="ui">
+  <div class="center">
+    <div class="mode" id="mode"></div>
+    <div class="time" id="time" role="timer">25:00</div>
+    <div class="ctrls">
+      <button class="quiet" id="reset" type="button">Reset</button>
+      <button class="go" id="start" type="button">Begin</button>
+      <button class="quiet" id="skip" type="button">Skip</button>
+    </div>
+    <div class="lengths">
+      <button id="focusBtn" type="button" title="Tap to change focus length">25 min focus</button>
+      <span>·</span>
+      <button id="breakBtn" type="button" title="Tap to change break length">5 min break</button>
+    </div>
+  </div>
+</div>
+<div class="tally" id="tally"></div>
+
+<script>
+// ---------- State ----------
+const KEY = "cookie-timer-v1";
+const DEMO = location.hash === "#demo";
+const FOCUS_OPTS = [15, 20, 25, 30, 45, 50, 60, 90], BREAK_OPTS = [3, 5, 10, 15, 20];
+const $ = id => document.getElementById(id);
+function load() { try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && typeof s.jar === "number") return s; } catch (e) {} return { focus: 25, brk: 5, jar: 0, total: 0 }; }
+let st = DEMO ? { focus: 25, brk: 5, jar: 60, total: 212 } : load();
+const save = () => { if (DEMO) return; try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} };
+
+// Integer hash so neighboring cookies get unrelated values
+function hash(n) { n = (n ^ 61) ^ (n >>> 16); n = n + (n << 3); n = n ^ (n >>> 4); n = Math.imul(n, 0x27d4eb2d); n = n ^ (n >>> 15); return (n >>> 0) / 4294967296; }
+const h = (a, b = 0) => hash((a * 7919 + b * 104729 + 12345) | 0);
+
+// ---------- Cookie friends: natural bakery colors ----------
+const KINDS = [
+  { dough: "#e9b46a", dark: "#b97a36", top: "#4a2a17", kind: "chips", w: 3 },          // chocolate chip
+  { dough: "#7b4a32", dark: "#55301f", top: "#f3e7d3", kind: "chips", w: 2 },          // double chocolate
+  { dough: "#d9b484", dark: "#a87d4f", top: "#4a2230", kind: "oat", w: 2 },            // oatmeal raisin
+  { dough: "#f3d9a8", dark: "#cfa66a", top: "#9a5a2a", kind: "cinnamon", w: 2 },       // snickerdoodle
+  { dough: "#e2a65e", dark: "#b07438", top: "#9c6430", kind: "fork", w: 1 },           // peanut butter
+  { dough: "#ecc489", dark: "#c08a4c", top: "#f6ecda", kind: "macadamia", w: 1 },      // white chocolate macadamia
+  { dough: "#f5dcb0", dark: "#d4ac74", top: "#e9a0a8", kind: "sprinkles", w: 1 },      // sugar, soft sprinkles
+];
+const SPRINKLES = ["#e9a0a8", "#9cc9de", "#f1d38a", "#ffffff"];
+const S = 100, R0 = 40;
+function outline(g, seed, amp, r = R0) {
+  g.beginPath();
+  for (let a = 0; a <= 40; a++) { const t = a / 40 * Math.PI * 2, rr = r * (1 + amp * (Math.sin(t * 3 + seed * 5) * .5 + Math.sin(t * 5 + seed * 9) * .3 + (h(seed, a) - .5) * .4)); g.lineTo(Math.cos(t) * rr, Math.sin(t) * rr); }
+  g.closePath();
+}
+function spots(seed, n, spread) {
+  // Keep toppings off the face area in the middle
+  const out = [];
+  for (let k = 0; out.length < n && k < n * 8; k++) {
+    const t = h(seed, k * 2) * Math.PI * 2, d = Math.sqrt(h(seed, k * 2 + 1)) * R0 * spread, x = Math.cos(t) * d, y = Math.sin(t) * d;
+    if (Math.abs(x) < R0 * .62 && y > -R0 * .3 && y < R0 * .45) continue;
+    out.push([x, y, k]);
+  }
+  return out;
+}
+function nub(g, x, y, s, seed) { g.beginPath(); for (let a = 0; a < 6; a++) { const t = a / 6 * Math.PI * 2 + h(seed, 99), rr = s * (.75 + h(seed, a) * .45); g.lineTo(x + Math.cos(t) * rr, y + Math.sin(t) * rr); } g.closePath(); }
+function bake(ki, v) {
+  const c = document.createElement("canvas"); c.width = c.height = S; const g = c.getContext("2d"); g.translate(S / 2, S / 2);
+  const K = KINDS[ki], seed = ki * 10 + v + 1;
+  outline(g, seed, .03); g.save(); g.translate(0, 3); g.fillStyle = "rgba(60,35,15,.16)"; g.fill(); g.restore();
+  outline(g, seed, .03); g.fillStyle = K.dough; g.fill();
+  g.save(); outline(g, seed, .03); g.clip();
+  g.fillStyle = K.dark; g.globalAlpha = .3; g.beginPath(); g.ellipse(0, R0 * 1.05, R0 * 1.2, R0 * .55, 0, 0, 7); g.fill(); g.globalAlpha = 1;
+  if (K.kind === "chips") for (const [x, y, k] of spots(seed, 6, .8)) { nub(g, x, y, 4.5 + h(seed, k + 200) * 3, seed * 31 + k); g.fillStyle = K.top; g.fill(); g.strokeStyle = "#3a281c"; g.lineWidth = 1.1; g.stroke(); }
+  if (K.kind === "oat") {
+    for (const [x, y, k] of spots(seed + 7, 10, .88)) { g.fillStyle = "#f5e8cc"; g.beginPath(); g.ellipse(x, y, 4, 2, h(seed, k) * 3, 0, 7); g.fill(); }
+    for (const [x, y, k] of spots(seed, 4, .78)) { nub(g, x, y, 4.2, seed * 17 + k); g.fillStyle = K.top; g.fill(); }
+  }
+  if (K.kind === "cinnamon") for (const [x, y, k] of spots(seed, 60, .92)) { g.fillStyle = K.top; g.globalAlpha = .35 + h(seed, k + 70) * .4; g.beginPath(); g.arc(x, y, 1 + h(seed, k + 40) * 1.2, 0, 7); g.fill(); g.globalAlpha = 1; }
+  if (K.kind === "fork") { // classic fork crosshatch, kept faint so the face reads
+    g.strokeStyle = K.top; g.globalAlpha = .32; g.lineWidth = 1.6;
+    for (let k = -3; k <= 3; k++) { const o = k * 9 + (h(seed, k + 20) - .5) * 2;
+      g.beginPath(); g.moveTo(-R0, o); g.lineTo(R0, o); g.stroke(); g.beginPath(); g.moveTo(o, -R0); g.lineTo(o, R0); g.stroke(); }
+    g.globalAlpha = 1; }
+  if (K.kind === "macadamia") {
+    for (const [x, y, k] of spots(seed, 4, .8)) { nub(g, x, y, 5 + h(seed, k) * 2, seed * 13 + k); g.fillStyle = K.top; g.fill(); g.strokeStyle = "#3a281c"; g.lineWidth = 1; g.stroke(); }
+    for (const [x, y, k] of spots(seed + 50, 2, .8)) { g.fillStyle = "#e8d2a2"; g.beginPath(); g.ellipse(x, y, 6, 4.8, h(seed, k) * 3, 0, 7); g.fill(); g.strokeStyle = "#3a281c"; g.lineWidth = 1; g.stroke(); }
+  }
+  if (K.kind === "sprinkles") { g.lineCap = "round"; g.lineWidth = 3;
+    for (const [x, y, k] of spots(seed, 12, .82)) { const a = h(seed, k + 300) * Math.PI; g.strokeStyle = SPRINKLES[k % SPRINKLES.length]; g.beginPath(); g.moveTo(x - Math.cos(a) * 3.5, y - Math.sin(a) * 3.5); g.lineTo(x + Math.cos(a) * 3.5, y + Math.sin(a) * 3.5); g.stroke(); } }
+  g.restore();
+  outline(g, seed, .03); g.lineWidth = 2.2; g.strokeStyle = "#3a281c"; g.stroke();
+  return c;
+}
+const sprites = KINDS.map((_, ki) => [0, 1, 2].map(v => bake(ki, v)));
+const bag = []; KINDS.forEach((k, ki) => { for (let w = 0; w < k.w; w++) bag.push(ki); });
+function kindFor(i) { // weighted pick that avoids repeating the previous cookie's kind
+  let k = bag[Math.floor(h(i, 7) * bag.length)];
+  if (k === kindFor.last) k = bag[Math.floor(h(i, 8) * bag.length)];
+  if (k === kindFor.last) k = (k + 1 + Math.floor(h(i, 9) * (KINDS.length - 1))) % KINDS.length;
+  kindFor.last = k; return k;
+}
+
+// ---------- Jar physics (Verlet circles) and crumbs ----------
+const cv = $("jar"), ctx = cv.getContext("2d");
+let W = 0, H = 0, R = 26, bodies = [], crumbs = [], running = false, still = 0;
+const G = 0.32, DAMP = 0.992;
+function capacity() { return Math.floor((W * H) / (4 * R * R) * 0.8); }
+function resize() {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  R = Math.max(20, Math.min(36, Math.min(W, H) / 20));
+  bodies.forEach(b => b.r = R * b.f);
+}
+function makeBody(i, x, y) { const f = .85 + h(i, 3) * .3; return { x, y, px: x, py: y, f, r: R * f, rot: (h(i, 4) - .5) * .9, k: kindFor(i), v: Math.floor(h(i, 5) * 3), face: Math.floor(h(i, 6) * 5), hold: 0, born: 0, landed: true, squash: 0, ouch: 0 }; }
+function burst(b, sp) {
+  const K = KINDS[b.k], cols = [K.dough, K.dough, K.dark, K.top];
+  for (let i = 0; i < 12 + sp; i++) { const a = -Math.PI / 2 + (Math.random() - .5) * 2.6, v = 1 + Math.random() * (1.4 + sp * .35);
+    crumbs.push({ x: b.x + (Math.random() - .5) * b.r, y: b.y + b.r * .5, vx: Math.cos(a) * v, vy: Math.sin(a) * v, s: 1.6 + Math.random() * 2.4, rot: Math.random() * 6, vr: (Math.random() - .5) * .4, c: cols[Math.floor(Math.random() * cols.length)], life: 60 + Math.random() * 50, star: i < 3 }); }
+  thud(sp);
+}
+function step() {
+  const now = performance.now();
+  for (const b of bodies) {
+    if (b.hold > now) continue;
+    const vx = (b.x - b.px) * DAMP, vy = (b.y - b.py) * DAMP;
+    b.px = b.x; b.py = b.y; b.x += vx; b.y += vy + G; b.vin = vy + G;
+    b.rot += vx / b.r * .35; b.rot *= .995; // tilt a little, then ease back upright so faces stay readable
+  }
+  for (let it = 0; it < 4; it++) {
+    for (let i = 0; i < bodies.length; i++) {
+      const a = bodies[i];
+      for (let j = i + 1; j < bodies.length; j++) {
+        const b = bodies[j], dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, min = a.r + b.r;
+        if (d2 < min * min && d2 > 0.0001) {
+          const d = Math.sqrt(d2), push = (min - d) / 2, nx = dx / d, ny = dy / d, ah = a.hold > now, bh = b.hold > now;
+          if (!ah) { a.x -= nx * push * (bh ? 2 : 1); a.y -= ny * push * (bh ? 2 : 1); }
+          if (!bh) { b.x += nx * push * (ah ? 2 : 1); b.y += ny * push * (ah ? 2 : 1); }
+        }
+      }
+    }
+    for (const b of bodies) {
+      if (b.hold > now) continue;
+      if (b.y > H - b.r) { b.y = H - b.r; b.px += (b.x - b.px) * .2; }
+      if (b.x < b.r) b.x = b.r;
+      if (b.x > W - b.r) b.x = W - b.r;
+    }
+  }
+  for (const b of bodies) { if (b.landed || b.hold > now) continue; if (b.vin > 2.2 && (b.y - b.py) < b.vin * .45) { b.landed = true; b.squash = now; b.ouch = now; burst(b, b.vin); } }
+  for (const c of crumbs) { c.vy += .22; c.vx *= .985; c.x += c.vx; c.y += c.vy; c.rot += c.vr; c.life--; if (c.y > H - 2) { c.y = H - 2; c.vy *= -.25; c.vx *= .6; c.vr *= .5; } }
+  crumbs = crumbs.filter(c => c.life > 0);
+}
+function face(g, b, now) {
+  const r = b.r, ouch = b.ouch && now - b.ouch < 700;
+  g.fillStyle = "#2b1d14"; g.strokeStyle = "#2b1d14"; g.lineWidth = Math.max(1.4, r * .08); g.lineCap = "round"; g.lineJoin = "round";
+  const ex = r * .3, ey = 0, e = r * .085;
+  if (ouch) { for (const s of [-1, 1]) { g.beginPath(); g.moveTo(s * (ex + e * 1.2), ey - e * 1.2); g.lineTo(s * (ex - e * 1.2), ey); g.lineTo(s * (ex + e * 1.2), ey + e * 1.2); g.stroke(); }
+    g.beginPath(); g.ellipse(0, r * .25, r * .07, r * .09, 0, 0, 7); g.fill(); }
+  else if (b.face === 2 || b.face === 4) { for (const s of [-1, 1]) { g.beginPath(); g.arc(s * ex, ey + (b.face === 2 ? -e * .3 : e * .6), e * 1.2, b.face === 2 ? .15 * Math.PI : 1.15 * Math.PI, b.face === 2 ? .85 * Math.PI : 1.85 * Math.PI); g.stroke(); } }
+  else for (const s of [-1, 1]) { g.beginPath(); g.arc(s * ex, ey, e, 0, 7); g.fill(); g.fillStyle = "#ffffff"; g.beginPath(); g.arc(s * ex - e * .35, ey - e * .35, e * .35, 0, 7); g.fill(); g.fillStyle = "#2b1d14"; }
+  if (!ouch) {
+    if (b.face === 1) { g.beginPath(); g.ellipse(0, r * .24, r * .07, r * .08, 0, 0, 7); g.fill(); }
+    else if (b.face === 3) { g.beginPath(); g.arc(0, r * .16, r * .14, .1 * Math.PI, .9 * Math.PI); g.closePath(); g.fill(); g.fillStyle = "#ef7f8f"; g.beginPath(); g.arc(0, r * .27, r * .06, 0, Math.PI); g.fill(); }
+    else { g.beginPath(); g.arc(0, r * .14, r * .11, .2 * Math.PI, .8 * Math.PI); g.stroke(); }
+  }
+  g.fillStyle = "rgba(255,120,140,.42)"; for (const s of [-1, 1]) { g.beginPath(); g.ellipse(s * r * .5, r * .18, r * .12, r * .07, 0, 0, 7); g.fill(); }
+}
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const now = performance.now();
+  for (const b of bodies) {
+    let sc = 1, sx = 1, sy = 1;
+    if (b.born) { const t = Math.min(1, (now - b.born) / 420); sc = 1 - Math.pow(1 - t, 3) + Math.sin(t * Math.PI) * .12; }
+    if (b.squash) { const t = (now - b.squash) / 240; if (t < 1) { const k = Math.sin(t * Math.PI) * (1 - t) * .18; sx = 1 + k; sy = 1 - k; } }
+    ctx.save(); ctx.translate(b.x, b.y); ctx.scale(sx * sc, sy * sc); ctx.rotate(b.rot);
+    const s = b.r * 2 * (S / (R0 * 2)); ctx.drawImage(sprites[b.k][b.v], -s / 2, -s / 2, s, s);
+    face(ctx, b, now);
+    ctx.restore();
+  }
+  for (const c of crumbs) {
+    ctx.save(); ctx.globalAlpha = Math.min(1, c.life / 25); ctx.translate(c.x, c.y); ctx.rotate(c.rot);
+    if (c.star) { ctx.fillStyle = "#f5c542"; ctx.beginPath(); for (let a = 0; a < 10; a++) { const rr = a % 2 ? 1.7 : 4.2, t = a * Math.PI / 5; ctx.lineTo(Math.cos(t) * rr, Math.sin(t) * rr); } ctx.fill(); }
+    else { ctx.fillStyle = c.c; ctx.beginPath(); ctx.moveTo(-c.s, -c.s * .4); ctx.lineTo(c.s * .2, -c.s * .8); ctx.lineTo(c.s, c.s * .1); ctx.lineTo(-c.s * .1, c.s * .7); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+  }
+}
+function loop() {
+  step(); draw();
+  const now = performance.now();
+  const moving = crumbs.length || bodies.some(b => b.hold > now || (b.ouch && now - b.ouch < 800) || Math.abs(b.x - b.px) + Math.abs(b.y - b.py) > .05 || Math.abs(b.rot) > .02 && b.born);
+  still = moving ? 0 : still + 1;
+  if (still > 30) { running = false; return; }
+  requestAnimationFrame(loop);
+}
+function wake() { still = 0; if (!running) { running = true; requestAnimationFrame(loop); } }
+function fillJar() {
+  // Drop saved cookies from scattered spots so the pile settles unevenly, then show it at rest
+  const n = Math.min(st.jar, capacity()); bodies = []; crumbs = []; kindFor.last = -1;
+  const perRow = Math.max(1, Math.floor(W / (R * 2)));
+  for (let i = 0; i < n; i++) bodies.push(makeBody(i, R + h(i, 11) * (W - 2 * R), H - R - (i / perRow) * R * 2.2 - h(i, 12) * R * 3));
+  for (let k = 0; k < 420; k++) step();
+  bodies.forEach(b => { b.px = b.x; b.py = b.y; });
+  draw();
+}
+function dropCookie() {
+  if (bodies.length >= capacity()) return;
+  const b = makeBody(st.total + 1000, W / 2 + (Math.random() - .5) * 60, Math.max(R + 10, H * .5 - 160));
+  b.hold = performance.now() + 1000; b.born = performance.now(); b.landed = false;
+  bodies.push(b); wake();
+}
+window.addEventListener("resize", () => { resize(); fillJar(); });
+
+// ---------- Sound ----------
+let audio = null;
+function chime(times) {
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < times; i++) { const t = audio.currentTime + i * .35;
+      for (const [f, v] of [[784, .18], [1568, .04]]) { const o = audio.createOscillator(), g = audio.createGain(); o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + 1.2); o.start(t); o.stop(t + 1.3); } } } catch (e) {}
+}
+function thud(speed) {
+  if (!audio) return;
+  try { const t = audio.currentTime, len = Math.floor(audio.sampleRate * .12), buf = audio.createBuffer(1, len, audio.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    const src = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+    src.buffer = buf; f.type = "lowpass"; f.frequency.value = 900; g.gain.value = Math.min(.25, .06 + speed * .02);
+    src.connect(f); f.connect(g); g.connect(audio.destination); src.start(t); } catch (e) {}
+}
+
+// ---------- Timer ----------
+let mode = "focus", left = st.focus * 60, endAt = null, tick = null, wl = null, confirmClear = false;
+const total = () => (mode === "focus" ? st.focus : st.brk) * 60;
+const fmt = s => String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+function render() {
+  $("time").textContent = fmt(left);
+  const runningT = !!endAt, started = left < total();
+  $("mode").textContent = mode === "break" ? "Break" : runningT ? "Focus" : started ? "Paused" : "";
+  $("start").textContent = runningT ? "Pause" : started ? "Resume" : mode === "break" ? "Start break" : "Begin";
+  $("focusBtn").textContent = st.focus + " min focus";
+  $("breakBtn").textContent = st.brk + " min break";
+  document.title = runningT ? fmt(left) + " · Focus Timer" : "Focus Timer";
+  $("tally").innerHTML = st.jar ? (confirmClear
+    ? `Empty the jar? <button id="clrYes" type="button">Empty</button><button id="clrNo" type="button">Keep</button>`
+    : `${st.jar} ${st.jar === 1 ? "cookie" : "cookies"} <button id="clr" type="button">Empty</button>`) : "";
+}
+function stop() { clearInterval(tick); tick = null; endAt = null; if (wl) { wl.release().catch(() => {}); wl = null; } }
+function setMode(m) { stop(); mode = m; left = total(); render(); }
+function finish() {
+  stop();
+  if (mode === "focus") { chime(3); st.jar++; st.total++; save(); dropCookie(); setMode("break"); }
+  else { chime(1); setMode("focus"); }
+}
+$("start").addEventListener("click", () => {
+  if (endAt) { left = Math.max(0, Math.round((endAt - Date.now()) / 1000)); stop(); render(); return; }
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {}
+  try { navigator.wakeLock && navigator.wakeLock.request("screen").then(w => wl = w).catch(() => {}); } catch (e) {}
+  endAt = Date.now() + left * 1000;
+  tick = setInterval(() => { left = Math.max(0, Math.round((endAt - Date.now()) / 1000)); render(); if (!left) finish(); }, 250);
+  render();
+});
+$("reset").addEventListener("click", () => setMode(mode));
+$("skip").addEventListener("click", () => setMode(mode === "focus" ? "break" : "focus"));
+const cycle = (opts, v) => opts[(opts.indexOf(v) + 1) % opts.length] ?? opts[0];
+$("focusBtn").addEventListener("click", () => { st.focus = cycle(FOCUS_OPTS, st.focus); save(); if (!endAt && mode === "focus") left = total(); render(); });
+$("breakBtn").addEventListener("click", () => { st.brk = cycle(BREAK_OPTS, st.brk); save(); if (!endAt && mode === "break") left = total(); render(); });
+$("tally").addEventListener("click", e => {
+  const id = e.target.id;
+  if (id === "clr") confirmClear = true;
+  else if (id === "clrNo") confirmClear = false;
+  else if (id === "clrYes") { confirmClear = false; st.jar = 0; save(); bodies = []; crumbs = []; draw(); }
+  else return;
+  render();
+});
+
+resize(); fillJar(); render();
+// Preview: #demo drops a new cookie every few seconds so the fall can be seen
+if (DEMO) { document.addEventListener("pointerdown", () => { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {} }, { once: true });
+  setInterval(() => { st.jar++; st.total++; dropCookie(); render(); }, 3200); }
+</script>
+
+</html>
