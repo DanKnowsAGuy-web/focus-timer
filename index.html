@@ -31,6 +31,8 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 .tally { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 18px; z-index: 2; font-size: 12px; color: var(--muted); display: flex; gap: 10px; align-items: center; background: var(--pill); padding: 6px 12px; border-radius: 999px; }
 .tally button { font: inherit; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
 .tally:empty { display: none; }
+.tilt { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); left: 18px; z-index: 2; font: inherit; font-size: 12px; color: var(--muted); background: var(--pill); border: 0; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.tilt.on { color: var(--fg); font-weight: 600; }
 .tally .step { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); text-decoration: none; color: var(--fg); font-size: 15px; line-height: 1; display: grid; place-items: center; }
 .tally input { font: inherit; width: 4.5ch; text-align: center; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px; -moz-appearance: textfield; }
 .tally input::-webkit-inner-spin-button { -webkit-appearance: none; }
@@ -55,6 +57,7 @@ button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
   </div>
 </div>
 <div class="tally" id="tally"></div>
+<button class="tilt" id="tilt" type="button" hidden>Tilt to roll</button>
 
 <script>
 // ---------- State ----------
@@ -139,6 +142,7 @@ function kindFor(i) { // weighted pick that avoids repeating the previous cookie
 const cv = $("jar"), ctx = cv.getContext("2d");
 let W = 0, H = 0, R = 26, bodies = [], crumbs = [], running = false, still = 0;
 const G = 0.32, DAMP = 0.992;
+let GX = 0, GY = G, tiltOn = false; // gravity in screen space; tilt mode points it at the real "down"
 function capacity() { return Math.floor((W * H) / (4 * R * R) * 0.8); }
 function resize() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -159,8 +163,10 @@ function step() {
   for (const b of bodies) {
     if (b.hold > now) continue;
     const vx = (b.x - b.px) * DAMP, vy = (b.y - b.py) * DAMP;
-    b.px = b.x; b.py = b.y; b.x += vx; b.y += vy + G; b.vin = vy + G;
-    b.rot += vx / b.r * .35; b.rot *= .995; // tilt a little, then ease back upright so faces stay readable
+    b.px = b.x; b.py = b.y; b.x += vx + GX; b.y += vy + GY; b.vin = vy + GY;
+    // Roll a little, then ease back so faces stay upright relative to real gravity
+    const up = tiltOn ? Math.atan2(-GX, GY) : 0;
+    b.rot += vx / b.r * .35; b.rot += Math.atan2(Math.sin(up - b.rot), Math.cos(up - b.rot)) * .005;
   }
   for (let it = 0; it < 4; it++) {
     for (let i = 0; i < bodies.length; i++) {
@@ -177,12 +183,15 @@ function step() {
     for (const b of bodies) {
       if (b.hold > now) continue;
       if (b.y > H - b.r) { b.y = H - b.r; b.px += (b.x - b.px) * .2; }
-      if (b.x < b.r) b.x = b.r;
-      if (b.x > W - b.r) b.x = W - b.r;
+      if (tiltOn && b.y < b.r) { b.y = b.r; b.px += (b.x - b.px) * .2; } // ceiling only when the jar can be turned over
+      if (b.x < b.r) { b.x = b.r; if (tiltOn) b.py += (b.y - b.py) * .2; }
+      if (b.x > W - b.r) { b.x = W - b.r; if (tiltOn) b.py += (b.y - b.py) * .2; }
     }
   }
   for (const b of bodies) { if (b.landed || b.hold > now) continue; if (b.vin > 2.2 && (b.y - b.py) < b.vin * .45) { b.landed = true; b.squash = now; b.ouch = now; burst(b, b.vin); } }
-  for (const c of crumbs) { c.vy += .22; c.vx *= .985; c.x += c.vx; c.y += c.vy; c.rot += c.vr; c.life--; if (c.y > H - 2) { c.y = H - 2; c.vy *= -.25; c.vx *= .6; c.vr *= .5; } }
+  for (const c of crumbs) { c.vx += GX / G * .22; c.vy += GY / G * .22; c.vx *= .985; c.x += c.vx; c.y += c.vy; c.rot += c.vr; c.life--;
+    if (c.y > H - 2) { c.y = H - 2; c.vy *= -.25; c.vx *= .6; c.vr *= .5; }
+    if (c.y < 2 && tiltOn) { c.y = 2; c.vy *= -.25; } if (c.x < 2) { c.x = 2; c.vx *= -.25; } if (c.x > W - 2) { c.x = W - 2; c.vx *= -.25; } }
   crumbs = crumbs.filter(c => c.life > 0);
 }
 function face(g, b, now) {
@@ -223,7 +232,7 @@ function loop() {
   spawnFromQueue(performance.now());
   step(); draw();
   const now = performance.now();
-  const moving = queue || crumbs.length || bodies.some(b => b.hold > now || (b.ouch && now - b.ouch < 800) || Math.abs(b.x - b.px) + Math.abs(b.y - b.py) > .05 || Math.abs(b.rot) > .02 && b.born);
+  const moving = queue || crumbs.length || bodies.some(b => b.hold > now || (b.ouch && now - b.ouch < 800) || Math.abs(b.x - b.px) + Math.abs(b.y - b.py) > .05);
   still = moving ? 0 : still + 1;
   if (still > 30) { running = false; return; }
   requestAnimationFrame(loop);
@@ -337,6 +346,51 @@ $("tally").addEventListener("click", e => {
 });
 $("tally").addEventListener("change", e => { if (e.target.id === "jarIn") setJar(e.target.value); });
 $("tally").addEventListener("keydown", e => { if (e.target.id === "jarIn" && e.key === "Enter") { setJar(e.target.value); editingJar = false; renderTally(); } });
+
+// ---------- Tilt to roll (phones and tablets) ----------
+// Reads the motion sensor and points gravity at the real "down". iPhone/iPad need a tap to grant motion access.
+let sign = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ? -1 : 1;
+let beta = null, lastShake = 0;
+function screenAngle() { const a = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0; return ((a % 360) + 360) % 360; }
+function onOrient(e) { beta = e.beta; }
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
+  // Calibrate the axis sign once the device is held upright (browsers disagree on it)
+  if (beta != null && beta > 55 && Math.abs(a.y) > 6) sign = a.y > 0 ? 1 : -1;
+  const sx = -sign * a.x, sy = sign * a.y; // gravity in the device's portrait screen space (x right, y down)
+  let X = sx, Y = sy; const ang = screenAngle();
+  if (ang === 90) { X = sy; Y = -sx; } else if (ang === 180) { X = -sx; Y = -sy; } else if (ang === 270) { X = -sy; Y = sx; }
+  const nx = Math.max(-1.2, Math.min(1.2, X / 9.81)) * G, ny = Math.max(-1.2, Math.min(1.2, Y / 9.81)) * G;
+  const changed = Math.abs(nx - GX) + Math.abs(ny - GY) > .01;
+  GX += (nx - GX) * .5; GY += (ny - GY) * .5;
+  // Shake: jostle the whole pile
+  const s = e.acceleration, now = performance.now();
+  if (s && s.x != null && Math.hypot(s.x, s.y, s.z || 0) > 13 && now - lastShake > 350) {
+    lastShake = now;
+    for (const b of bodies) { b.px += (Math.random() - .5) * 8; b.py += Math.random() * 6; } // a random toss, mostly upward
+    for (const b of bodies.slice(-6)) burst(b, 3);
+  }
+  if (changed || now - lastShake < 50) wake();
+}
+function setTilt(on) {
+  tiltOn = on; $("tilt").classList.toggle("on", on); $("tilt").textContent = on ? "Tilt on" : "Tilt to roll";
+  if (on) { addEventListener("devicemotion", onMotion); addEventListener("deviceorientation", onOrient); }
+  else { removeEventListener("devicemotion", onMotion); removeEventListener("deviceorientation", onOrient); GX = 0; GY = G; for (const b of bodies) if (b.y < b.r) b.y = b.r; wake(); }
+}
+if ("DeviceMotionEvent" in window && matchMedia("(pointer: coarse)").matches) {
+  $("tilt").hidden = false;
+  $("tilt").addEventListener("click", async () => {
+    if (tiltOn) { setTilt(false); return; }
+    try {
+      if (typeof DeviceMotionEvent.requestPermission === "function") {
+        const r = await DeviceMotionEvent.requestPermission();
+        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") await DeviceOrientationEvent.requestPermission().catch(() => {});
+        if (r !== "granted") { $("tilt").textContent = "Motion access denied"; return; }
+      }
+      setTilt(true);
+    } catch (e) { $("tilt").textContent = "Tilt not available here"; }
+  });
+}
 
 resize(); render();
 // Opening the page: the saved cookies rain back in and refill the jar
