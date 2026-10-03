@@ -31,6 +31,9 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 .tally { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: 18px; z-index: 2; font-size: 12px; color: var(--muted); display: flex; gap: 10px; align-items: center; background: var(--pill); padding: 6px 12px; border-radius: 999px; }
 .tally button { font: inherit; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
 .tally:empty { display: none; }
+.tally .step { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); text-decoration: none; color: var(--fg); font-size: 15px; line-height: 1; display: grid; place-items: center; }
+.tally input { font: inherit; width: 4.5ch; text-align: center; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px; -moz-appearance: textfield; }
+.tally input::-webkit-inner-spin-button { -webkit-appearance: none; }
 button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
 </style>
 
@@ -217,14 +220,25 @@ function draw() {
   }
 }
 function loop() {
+  spawnFromQueue(performance.now());
   step(); draw();
   const now = performance.now();
-  const moving = crumbs.length || bodies.some(b => b.hold > now || (b.ouch && now - b.ouch < 800) || Math.abs(b.x - b.px) + Math.abs(b.y - b.py) > .05 || Math.abs(b.rot) > .02 && b.born);
+  const moving = queue || crumbs.length || bodies.some(b => b.hold > now || (b.ouch && now - b.ouch < 800) || Math.abs(b.x - b.px) + Math.abs(b.y - b.py) > .05 || Math.abs(b.rot) > .02 && b.born);
   still = moving ? 0 : still + 1;
   if (still > 30) { running = false; return; }
   requestAnimationFrame(loop);
 }
 function wake() { still = 0; if (!running) { running = true; requestAnimationFrame(loop); } }
+// Refill: cookies rain in from above the screen, a few per second, and pile up
+let queue = 0, nextSpawn = 0, spawnGap = 60, spawnIdx = 5000;
+function refill(n, gap) { if (n <= 0) return; queue += n; spawnGap = gap; wake(); }
+function spawnFromQueue(now) {
+  if (!queue || now < nextSpawn) return;
+  if (bodies.length >= capacity()) { queue = 0; return; }
+  const i = spawnIdx++, b = makeBody(i, R + h(i, 21) * (W - 2 * R), -R - h(i, 22) * R * 2);
+  b.landed = h(i, 23) > .35; // only some cookies throw crumbs, so a big refill isn't noisy
+  bodies.push(b); queue--; nextSpawn = now + spawnGap;
+}
 function fillJar() {
   // Drop saved cookies from scattered spots so the pile settles unevenly, then show it at rest
   const n = Math.min(st.jar, capacity()); bodies = []; crumbs = []; kindFor.last = -1;
@@ -271,9 +285,23 @@ function render() {
   $("focusBtn").textContent = st.focus + " min focus";
   $("breakBtn").textContent = st.brk + " min break";
   document.title = runningT ? fmt(left) + " · Focus Timer" : "Focus Timer";
-  $("tally").innerHTML = st.jar ? (confirmClear
-    ? `Empty the jar? <button id="clrYes" type="button">Empty</button><button id="clrNo" type="button">Keep</button>`
-    : `${st.jar} ${st.jar === 1 ? "cookie" : "cookies"} <button id="clr" type="button">Empty</button>`) : "";
+  if (!editingJar && !confirmClear) renderTally(); // don't redraw the box while someone is typing in it
+}
+// Cookie count: tap Edit to add cookies back (for example after browser data was cleared) or remove some
+let editingJar = false;
+function renderTally() {
+  const t = $("tally");
+  if (confirmClear) t.innerHTML = `Empty the jar? <button id="clrYes" type="button">Empty</button><button id="clrNo" type="button">Keep</button>`;
+  else if (editingJar) t.innerHTML = `<button class="step" id="jarMinus" type="button" aria-label="Remove a cookie">−</button><input id="jarIn" type="number" inputmode="numeric" min="0" max="9999" value="${st.jar}" aria-label="Number of cookies"><button class="step" id="jarPlus" type="button" aria-label="Add a cookie">+</button><button id="jarDone" type="button">Done</button><button id="clr" type="button">Empty</button>`;
+  else t.innerHTML = `${st.jar} ${st.jar === 1 ? "cookie" : "cookies"} <button id="jarEdit" type="button">Edit</button>`;
+}
+function setJar(v) {
+  v = Math.max(0, Math.min(9999, Math.round(Number(v) || 0)));
+  st.jar = v; save();
+  const target = Math.min(v, capacity()), shown = bodies.length + queue;
+  if (target > shown) refill(target - shown, 110);
+  else { let cut = shown - target; const q = Math.min(queue, cut); queue -= q; cut -= q; bodies.splice(Math.max(0, bodies.length - cut), cut); wake(); draw(); }
+  const inp = $("jarIn"); if (inp && document.activeElement !== inp) inp.value = v; else if (!inp) renderTally();
 }
 function stop() { clearInterval(tick); tick = null; endAt = null; if (wl) { wl.release().catch(() => {}); wl = null; } }
 function setMode(m) { stop(); mode = m; left = total(); render(); }
@@ -297,14 +325,23 @@ $("focusBtn").addEventListener("click", () => { st.focus = cycle(FOCUS_OPTS, st.
 $("breakBtn").addEventListener("click", () => { st.brk = cycle(BREAK_OPTS, st.brk); save(); if (!endAt && mode === "break") left = total(); render(); });
 $("tally").addEventListener("click", e => {
   const id = e.target.id;
-  if (id === "clr") confirmClear = true;
+  if (id === "jarEdit") editingJar = true;
+  else if (id === "jarDone") editingJar = false;
+  else if (id === "jarPlus") { setJar(st.jar + 1); $("jarIn").value = st.jar; return; }
+  else if (id === "jarMinus") { setJar(st.jar - 1); $("jarIn").value = st.jar; return; }
+  else if (id === "clr") confirmClear = true;
   else if (id === "clrNo") confirmClear = false;
-  else if (id === "clrYes") { confirmClear = false; st.jar = 0; save(); bodies = []; crumbs = []; draw(); }
+  else if (id === "clrYes") { confirmClear = false; editingJar = false; st.jar = 0; save(); queue = 0; bodies = []; crumbs = []; draw(); }
   else return;
-  render();
+  renderTally();
 });
+$("tally").addEventListener("change", e => { if (e.target.id === "jarIn") setJar(e.target.value); });
+$("tally").addEventListener("keydown", e => { if (e.target.id === "jarIn" && e.key === "Enter") { setJar(e.target.value); editingJar = false; renderTally(); } });
 
-resize(); fillJar(); render();
+resize(); render();
+// Opening the page: the saved cookies rain back in and refill the jar
+if (matchMedia("(prefers-reduced-motion: reduce)").matches) fillJar();
+else { bodies = []; const n = Math.min(st.jar, capacity()); refill(n, Math.max(18, Math.min(90, 2400 / Math.max(1, n)))); }
 // Preview: #demo drops a new cookie every few seconds so the fall can be seen
 if (DEMO) { document.addEventListener("pointerdown", () => { try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {} }, { once: true });
   setInterval(() => { st.jar++; st.total++; dropCookie(); render(); }, 3200); }
