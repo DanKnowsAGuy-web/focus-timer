@@ -34,7 +34,8 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 .tilt { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); left: 18px; z-index: 2; font: inherit; font-size: 12px; color: var(--muted); background: var(--pill); border: 0; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
 .tilt.on { color: var(--fg); font-weight: 600; }
 .tally .step { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); text-decoration: none; color: var(--fg); font-size: 15px; line-height: 1; display: grid; place-items: center; }
-.tally input { font: inherit; width: 4.5ch; text-align: center; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px; -moz-appearance: textfield; }
+.tally .count { font: inherit; color: var(--fg); text-decoration: none; font-weight: 600; }
+.tally input { font: inherit; font-size: 16px; font-weight: 600; width: 6ch; text-align: center; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px; -moz-appearance: textfield; }
 .tally input::-webkit-inner-spin-button { -webkit-appearance: none; }
 button:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
 </style>
@@ -302,7 +303,11 @@ function renderTally() {
   const t = $("tally");
   if (confirmClear) t.innerHTML = `Empty the jar? <button id="clrYes" type="button">Empty</button><button id="clrNo" type="button">Keep</button>`;
   else if (editingJar) t.innerHTML = `<button class="step" id="jarMinus" type="button" aria-label="Remove a cookie">−</button><input id="jarIn" type="number" inputmode="numeric" min="0" max="9999" value="${st.jar}" aria-label="Number of cookies"><button class="step" id="jarPlus" type="button" aria-label="Add a cookie">+</button><button id="jarDone" type="button">Done</button><button id="clr" type="button">Empty</button>`;
-  else t.innerHTML = `${st.jar} ${st.jar === 1 ? "cookie" : "cookies"} <button id="jarEdit" type="button">Edit</button>`;
+  else t.innerHTML = `<button class="count" id="jarEdit" type="button" aria-label="Change cookie count">${st.jar}</button> ${st.jar === 1 ? "cookie" : "cookies"} <button id="jarEdit2" type="button">Edit</button>`;
+}
+function openJarEditor() {
+  editingJar = true; renderTally();
+  const inp = $("jarIn"); inp.focus(); inp.select(); // ready to type a number straight away
 }
 function setJar(v) {
   v = Math.max(0, Math.min(9999, Math.round(Number(v) || 0)));
@@ -334,8 +339,8 @@ $("focusBtn").addEventListener("click", () => { st.focus = cycle(FOCUS_OPTS, st.
 $("breakBtn").addEventListener("click", () => { st.brk = cycle(BREAK_OPTS, st.brk); save(); if (!endAt && mode === "break") left = total(); render(); });
 $("tally").addEventListener("click", e => {
   const id = e.target.id;
-  if (id === "jarEdit") editingJar = true;
-  else if (id === "jarDone") editingJar = false;
+  if (id === "jarEdit" || id === "jarEdit2") { openJarEditor(); return; }
+  else if (id === "jarDone") { setJar($("jarIn").value); editingJar = false; }
   else if (id === "jarPlus") { setJar(st.jar + 1); $("jarIn").value = st.jar; return; }
   else if (id === "jarMinus") { setJar(st.jar - 1); $("jarIn").value = st.jar; return; }
   else if (id === "clr") confirmClear = true;
