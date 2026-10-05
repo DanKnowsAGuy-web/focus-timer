@@ -45,3 +45,28 @@ export async function routeOriginToFixture(page, origin, fixtureRelPath) {
     return route.fulfill({ status: 204, body: '' });
   });
 }
+
+/** Bundle a module from extension/src into an IIFE string exposing globalName, for injection into a page. */
+export async function bundleForPage(entryRelToSrc, globalName) {
+  const { build } = await import('esbuild');
+  const result = await build({
+    entryPoints: [path.join(root, 'extension', 'src', entryRelToSrc)],
+    bundle: true,
+    write: false,
+    format: 'iife',
+    globalName,
+    target: 'chrome120',
+    logLevel: 'silent',
+  });
+  return result.outputFiles[0].text;
+}
+
+/** Fixture files for one YouTube page type, by naming convention <type>-<anything>.html. */
+export async function youtubeFixturesFor(type) {
+  const { readdir } = await import('node:fs/promises');
+  const dir = path.join(fixtures, 'youtube');
+  const names = await readdir(dir);
+  return names.filter((n) => n.startsWith(`${type}-`) && n.endsWith('.html')).map((n) => `youtube/${n}`);
+}
+
+export const toolsDir = path.join(root, 'tools');

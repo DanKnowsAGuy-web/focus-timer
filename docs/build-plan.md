@@ -681,7 +681,7 @@ Tick when the phase's "Done when" passes in a session **and** the human check
 is done.
 
 - [x] Phase 0: Scaffold and test harness (session checks passed 2026-10-05; human check pending)
-- [ ] Phase 1: YouTube anatomy, capture tool, selectors
+- [x] Phase 1: YouTube anatomy, capture tool, selectors (session checks passed 2026-10-05 on synthetic fixtures; test:live not runnable in cloud; human check pending: real captures)
 - [ ] Phase 2: Declutter to Unhook parity
 - [ ] Phase 3: Tab bar and rules classifier on YouTube
 - [ ] Phase 4: Item controls and corrections
@@ -711,3 +711,8 @@ Append a dated line whenever a fixed decision changes, with the reason.
   designed. To run it from a cloud session, add www.youtube.com under the
   environment's Allowed domains. Headless Chromium loaded the extension with
   no headed fallback needed.
+- 2026-10-05: Phase 1 built against synthetic fixtures generated from
+  YouTube's known element structure (tools/make-synthetic-fixtures.mjs),
+  because the cloud session cannot reach youtube.com. The "test:live must pass
+  once" check is deferred to the human or to a session with www.youtube.com
+  allowed. Real captures go in test/fixtures/youtube/ per its README.
