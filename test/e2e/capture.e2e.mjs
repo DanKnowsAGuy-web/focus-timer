@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launchWithExtension, toolsDir } from './harness.mjs';
+import { launchWithExtension, toolsDir, setSettings, yt } from './harness.mjs';
 
 const RAW = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Secret Person - YouTube</title>
 <style>body{color:red}</style><script>window.leak = 1;</script></head>
@@ -26,6 +26,7 @@ test('capture tool scrubs text, names, ids and images but keeps structure and UI
   const captureSrc = await readFile(path.join(toolsDir, 'capture.js'), 'utf8');
   const context = await launchWithExtension();
   try {
+    await setSettings(context, yt({ enabled: false }));
     const page = await context.newPage();
     await page.route('https://www.youtube.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: RAW }));
     await page.goto('https://www.youtube.com/', { waitUntil: 'domcontentloaded' });

@@ -70,3 +70,26 @@ export async function youtubeFixturesFor(type) {
 }
 
 export const toolsDir = path.join(root, 'tools');
+
+export async function getServiceWorker(context) {
+  let [sw] = context.serviceWorkers();
+  if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 10_000 });
+  return sw;
+}
+
+/** Replace stored settings (merged over defaults at read time by the extension). */
+export async function setSettings(context, settings) {
+  const sw = await getServiceWorker(context);
+  await sw.evaluate((s) => chrome.storage.sync.set({ settings: s }), settings);
+}
+
+export const yt = (patch) => ({ sites: { youtube: patch } });
+
+/** Visible means it has a layout box. Hidden ancestors collapse descendants too. */
+export const probes = `
+  window.__vis = (el) => Boolean(el) && el.getClientRects().length > 0;
+  window.__hid = (el) => Boolean(el) && el.getClientRects().length === 0;
+  window.__q = (s, r) => (r || document).querySelector(s);
+  window.__qa = (s, r) => [...(r || document).querySelectorAll(s)];
+  window.__twoFrames = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+`;

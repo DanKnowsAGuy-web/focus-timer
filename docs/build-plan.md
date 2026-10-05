@@ -682,7 +682,7 @@ is done.
 
 - [x] Phase 0: Scaffold and test harness (session checks passed 2026-10-05; human check pending)
 - [x] Phase 1: YouTube anatomy, capture tool, selectors (session checks passed 2026-10-05 on synthetic fixtures; test:live not runnable in cloud; human check pending: real captures)
-- [ ] Phase 2: Declutter to Unhook parity
+- [x] Phase 2: Declutter to Unhook parity (session checks passed 2026-10-05 on synthetic fixtures; human check pending: compare with Unhook on the live site)
 - [ ] Phase 3: Tab bar and rules classifier on YouTube
 - [ ] Phase 4: Item controls and corrections
 - [ ] Phase 5: Settings page
@@ -716,3 +716,11 @@ Append a dated line whenever a fixed decision changes, with the reason.
   because the cloud session cannot reach youtube.com. The "test:live must pass
   once" check is deferred to the human or to a session with www.youtube.com
   allowed. Real captures go in test/fixtures/youtube/ per its README.
+- 2026-10-05: Phase 2 adds a document_start content script for redirects
+  (home to subscriptions, Shorts to the regular player) and a background
+  service worker so tests and pages can reach chrome.storage. Hiding is one
+  attribute per element recording the reason, plus one stylesheet rule;
+  "Show extras" flips a single attribute on <html>. Subscriber counts are
+  excluded from the generic metrics finder because they have their own
+  toggle. Autoplay is turned off by clicking YouTube's own toggle, at most
+  once per two seconds, and the result is recorded on <html>.

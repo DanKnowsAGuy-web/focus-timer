@@ -16,6 +16,8 @@ await mkdir(dist, { recursive: true });
 await build({
   entryPoints: {
     'content/youtube': path.join(src, 'content', 'youtube.js'),
+    'content/youtube-early': path.join(src, 'content', 'youtube-early.js'),
+    'background': path.join(src, 'background.js'),
   },
   outdir: dist,
   bundle: true,

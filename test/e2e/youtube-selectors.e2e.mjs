@@ -2,7 +2,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { launchWithExtension, routeOriginToFixture, bundleForPage, youtubeFixturesFor, fixtures } from './harness.mjs';
+import { launchWithExtension, routeOriginToFixture, bundleForPage, youtubeFixturesFor, fixtures, setSettings, yt } from './harness.mjs';
 
 const ORIGIN = 'https://www.youtube.com';
 const URLS = {
@@ -18,6 +18,7 @@ before(async () => {
 });
 
 async function openFixture(context, type, fixtureRel) {
+  await setSettings(context, yt({ enabled: false }));
   const page = await context.newPage();
   await routeOriginToFixture(page, ORIGIN, fixtureRel);
   await page.goto(ORIGIN + URLS[type], { waitUntil: 'domcontentloaded' });

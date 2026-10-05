@@ -186,6 +186,15 @@ function watchPage() {
 </ytd-watch-flexy>
 </ytd-page-manager>
 </div></ytd-app>
+<script>
+// Synthetic only: mimic YouTube's player flipping the autoplay toggle on click.
+document.querySelector('.ytp-autonav-toggle-button').closest('button').addEventListener('click', function () {
+  var t = this.querySelector('.ytp-autonav-toggle-button');
+  var on = t.getAttribute('aria-checked') === 'true';
+  t.setAttribute('aria-checked', on ? 'false' : 'true');
+  t.setAttribute('aria-label', on ? 'Autoplay is off' : 'Autoplay is on');
+});
+</script>
 </body></html>`;
 }
 

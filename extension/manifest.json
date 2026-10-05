@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Feed Overlay",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Declutters your feeds, sorts them into your own tabs, and prices distraction in cookies you earn by focusing.",
   "permissions": ["storage"],
+  "background": { "service_worker": "background.js" },
   "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content/youtube-early.js"],
+      "run_at": "document_start"
+    },
     {
       "matches": ["https://www.youtube.com/*"],
       "js": ["content/youtube.js"],

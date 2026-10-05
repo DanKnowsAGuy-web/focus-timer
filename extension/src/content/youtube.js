@@ -1,9 +1,10 @@
-// Overlay entry for youtube.com.
-// Phase 1: mark ready, record page type and selector health on <html> so
-// tests and the settings page can read them. Later phases add declutter,
-// tabs, controls and the jar through this entry.
+// Overlay entry for youtube.com (document_idle).
 import { markReady } from '../lib/ready.js';
 import { pageType, healthCheck } from '../lib/selectors/youtube.js';
+import { getSettings, onSettingsChange } from '../lib/settings.js';
+import { applyAll, processAdded, applyToggleChange, redirectIfNeeded } from '../lib/declutter/youtube.js';
+import { createPipeline } from '../lib/pipeline.js';
+import { mountExtrasToggle, resetExtras } from '../lib/extras.js';
 
 function record() {
   const html = document.documentElement;
@@ -15,8 +16,37 @@ function record() {
   }
 }
 
-markReady(document, 'youtube');
-record();
-// YouTube is a single-page app; re-record after its own navigation event.
-document.addEventListener('yt-navigate-finish', record);
-window.addEventListener('popstate', record);
+async function main() {
+  let cfg = (await getSettings()).sites.youtube;
+  record();
+
+  if (cfg.enabled) {
+    if (redirectIfNeeded(document, cfg)) return;
+    applyAll(document, cfg);
+    mountExtrasToggle(document);
+
+    const target = document.querySelector('ytd-app') || document.body;
+    createPipeline(target, (nodes) => processAdded(nodes, cfg, document), {
+      ignore: (n) => n.id === 'feedoverlay-extras' || n.id === 'feedoverlay-style',
+    });
+
+    onSettingsChange((s) => {
+      const next = s.sites.youtube;
+      applyToggleChange(document, cfg, next);
+      cfg = next;
+    });
+
+    const onNavigate = () => {
+      record();
+      resetExtras(document);
+      if (redirectIfNeeded(document, cfg)) return;
+      applyAll(document, cfg);
+    };
+    document.addEventListener('yt-navigate-finish', onNavigate);
+    window.addEventListener('popstate', onNavigate);
+  }
+
+  markReady(document, 'youtube');
+}
+
+main();

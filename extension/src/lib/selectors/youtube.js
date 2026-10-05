@@ -224,15 +224,22 @@ export const findShortsItems = makeFinder('shortsItems', [
  * Metric elements inside a scope: view counts, watching counts, like counts,
  * subscriber counts. Time-ago text is not a metric and is left alone.
  */
+const SUBS_RE = /subscribers?$/i;
+
 export function findMetrics(scope) {
   const out = new Set();
   const direct = scope.querySelectorAll(
-    '#metadata-line .inline-metadata-item, #owner-sub-count, like-button-view-model .yt-spec-button-shape-next__button-text-content, ytd-watch-metadata #info span, ytd-like-button-renderer #text'
+    '#metadata-line .inline-metadata-item, like-button-view-model .yt-spec-button-shape-next__button-text-content, ytd-watch-metadata #info span, ytd-like-button-renderer #text'
   );
-  for (const el of direct) if (METRIC_RE.test(text(el)) || /^[\d.,]+[KMB]?$/.test(text(el))) out.add(el);
+  for (const el of direct) {
+    const t = text(el);
+    if (SUBS_RE.test(t)) continue; // subscriber counts have their own finder and toggle
+    if (METRIC_RE.test(t) || /^[\d.,]+[KMB]?$/.test(t)) out.add(el);
+  }
   if (out.size) { health.metrics = 'ids'; return [...out]; }
   for (const el of scope.querySelectorAll('span, div, yt-formatted-string')) {
-    if (el.children.length === 0 && METRIC_RE.test(text(el))) out.add(el);
+    const t = text(el);
+    if (el.children.length === 0 && METRIC_RE.test(t) && !SUBS_RE.test(t)) out.add(el);
   }
   health.metrics = out.size ? 'text' : 'none';
   return [...out];
