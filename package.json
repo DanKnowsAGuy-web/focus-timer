@@ -1,0 +1,18 @@
+{
+  "name": "feed-overlay",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Browser extension that declutters feeds, sorts them into your own tabs, and prices distraction in cookies earned by focusing.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "npm run build && npm run test:unit && npm run test:e2e",
+    "test:unit": "node --test \"test/unit/**/*.test.js\"",
+    "test:e2e": "node --test \"test/e2e/**/*.e2e.mjs\"",
+    "test:live": "node test/live/youtube.live.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.63.0"
+  }
+}

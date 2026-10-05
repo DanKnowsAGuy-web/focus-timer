@@ -680,7 +680,7 @@ the privacy page as a stranger deciding whether to install.
 Tick when the phase's "Done when" passes in a session **and** the human check
 is done.
 
-- [ ] Phase 0: Scaffold and test harness
+- [x] Phase 0: Scaffold and test harness (session checks passed 2026-10-05; human check pending)
 - [ ] Phase 1: YouTube anatomy, capture tool, selectors
 - [ ] Phase 2: Declutter to Unhook parity
 - [ ] Phase 3: Tab bar and rules classifier on YouTube
@@ -706,3 +706,8 @@ Append a dated line whenever a fixed decision changes, with the reason.
 - 2026-10-05: Jev proxy specified for a product: Cloudflare Worker, text-hash
   cache, install tokens with daily caps, origin check, no body logging,
   rules-only free, Smart sorting opt-in paid, BYOK as advanced setting.
+- 2026-10-05: Phase 0 built in a cloud session. The egress policy there
+  denies www.youtube.com, so `test:live` exits 2 with its message as
+  designed. To run it from a cloud session, add www.youtube.com under the
+  environment's Allowed domains. Headless Chromium loaded the extension with
+  no headed fallback needed.
